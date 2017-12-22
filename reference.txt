@@ -1,2 +1,3 @@
 https://docs.python.org/2/library/xml.etree.elementtree.html#module-xml.etree.ElementTree
-
+https://developers.google.com/edu/python/regular-expressions?csw=1
+https://docs.python.org/2/howto/regex.html
