@@ -2,15 +2,16 @@ import xml.etree.cElementTree as ET
 import codecs
 import json
 import re
-from datetime import datetime
-import time
+from bson.son import SON
 
 OSMFILE = "wuhan_china.osm"
 
 CREATED = ["version", "changeset", "timestamp", "user", "uid"]
 
 # Usually values for SERVICE are Yes
-FACILITY = ["bench", "shelter", "atm"]
+FACILITY = ["bus", "bench", "shelter", "atm"]
+
+ROAD = ["oneway", "lanes", "bridge", "highway", "tunnel"]
 
 # Keys of address node
 ADDRESS = dict.fromkeys(["housenumber", "postcode", "street"], None)
@@ -45,8 +46,10 @@ def audit_chinese(s):
     s = unicode(s)
     u_chinese = re.compile(u"[\u4e00-\u9fa5]+")
     rlt = u_chinese.search(s, 0)
-    if s != rlt:
+    if not rlt:
+        # print "F", s
         return False
+    # print "T",s, rlt.group()
     return True
 
 
@@ -61,12 +64,22 @@ def shape_element(element):
         srv = []
         for tag in element.iter("tag"):
             t, v = get_type(tag)
-            if t == 'name':
+            if tag.attrib['k'] == 'name':  # t == 'name':
                 # print tag.attrib['v']
+                str_name = ""
                 if audit_chinese(tag.attrib['v']):
-                    node[tag.attrib['k']] = audit_chinese(tag.attrib['v'])
-                elif len(v) > 1 and v[1] == 'zh':
-                    node["name"] = tag.attrib['v']
+                    str_name = tag.attrib['v']
+                if str_name.endswith(u"\u9053") or str_name.endswith(u"\u8def"):
+                    # print str_name
+                    road = {}
+                    for key in ROAD:
+                        q = "./tag[@k='{0}']".format(key)
+                        ntags = element.findall(q)
+                        for nt in ntags:
+                            road[nt.attrib['k']] = nt.attrib['v']
+                    if road.__len__ > 0:
+                        node["road"] = road
+                node["name"] = str_name
             elif t == 'addr':
                 if not node.has_key('address'):
                     node['address'] = ADDRESS
@@ -76,12 +89,10 @@ def shape_element(element):
                 srv.append(tag.attrib['k'])
             elif tag.attrib['k'] in KEEP:
                 node[tag.attrib['k']] = tag.attrib['v']
-            else:
-                pass
 
         if len(srv) > 0:
             node['facility'] = srv
-        node['type'] = 'node'
+        node['type'] = element.tag
         create = {}
         l = [0, 0]
         for attrib in element.attrib:
@@ -142,6 +153,14 @@ def id_query(id):
     return {"id": id}
 
 
+def most_frequent_user():
+    return [
+        {"$unwind": "$created.user"},
+        {"$group": {"_id": "$created.user", "count": {"$sum": 1}}},
+        {"$sort": SON([("count", -1), ("_id", -1)])}
+    ]
+
+
 def get_db():
     from pymongo import MongoClient
     client = MongoClient('mongotest.chinanorth.cloudapp.chinacloudapi.cn:27018')
@@ -149,7 +168,11 @@ def get_db():
     return db
 
 
-REGENERATE_DATA = True
+REGENERATE_DATA = False
+
+
+def reduce_count(curr, result):
+    result.total += 1
 
 
 def test():
@@ -160,13 +183,18 @@ def test():
         db.map.insert(data)
         print "inserted data"
 
-    # query = id_query("286073600")
+    print "Start query..."
+    query = id_query("286073600")
     # query = user_query("samsung galaxy s6")
-    query = service_query("atm")
+    # query = service_query("atm")
+    # query = most_frequent_user()
     nodes = db.map.find(query)
-    print "nodes.count() : %d" % nodes.count()
-    for node in nodes:
-        print node
+    # nodes = db.map.aggregate(
+    #     [{"$limit": 5}, {"$group": {"_id": "$created.user", "count": {"$sum": 1}}}, {"$sort": {"count", -1}}])
+    nodes = list(nodes)
+    print len(nodes)
+    # for node in nodes:
+    #     print node
 
 
 if __name__ == '__main__':
